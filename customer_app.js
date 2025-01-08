@@ -1,112 +1,104 @@
 // Importing necessary libraries and modules
-const mongoose = require('mongoose');            // MongoDB ODM library
-const Customers = require('./customer');         // Imported MongoDB model for 'customers'
-const express = require('express');              // Express.js web framework
-const bodyParser = require('body-parser');       // Middleware for parsing JSON requests
-const path = require('path');     // Node.js path module for working with file and directory paths
+const express = require('express');
+const mongoose = require('mongoose');  // MongoDB ODM
 const session = require('express-session');
-const bcrypt = require("bcrypt")
-const saltRounds = 5
-const password = "admin"
-// Creating an instance of the Express application
+const bcrypt = require('bcrypt');
+const bodyParser = require('body-parser');
+const path = require('path');
+const uuid = require('uuid');
+const Customers = require('./customer');
+
 const app = express();
+const port = 3000;
+const saltRounds = 5;
 
-const uuid = require('uuid'); //to generate a unique session id
+// 🔹 MongoDB Connection with Error Handling
+const uri = "mongodb://127.0.0.1:27017/customerDB";
+mongoose.connect(uri, { dbName: 'customerDB' })
+    .then(() => console.log("✅ MongoDB Connected"))
+    .catch(err => console.error("❌ MongoDB Connection Error:", err));
 
+// 🔹 Session Configuration
 app.use(session({
-      cookie: { maxAge: 120000 }, // Session expires after 2 minutes of inactivity
     secret: 'itsmysecret',
-    res: false,
+    resave: false,
     saveUninitialized: true,
-    genid: () => uuid.v4()
+    genid: () => uuid.v4(),
+    cookie: { maxAge: 120000 }  // Session expires after 2 minutes
 }));
 
-// Setting the port number for the server
-const port = 3000;
-
-// MongoDB connection URI and database name
-const uri = "mongodb://127.0.0.1:27017/customerDB";
-mongoose.connect(uri, {'dbName': 'customerDB'});
-
-// Middleware to parse JSON requests
-app.use("*", bodyParser.json());
-
-// Serving static files from the 'frontend' directory under the '/static' route
-app.use('/static', express.static(path.join(".", 'frontend')));
-
-// Middleware to handle URL-encoded form data
+// Middleware
+app.use(express.json());  // Use built-in JSON parser
 app.use(bodyParser.urlencoded({ extended: true }));
+app.use('/static', express.static(path.join(__dirname, 'frontend')));
 
-// POST endpoint for user login
-// POST endpoint for user login
+// 🔹 User Login Route
 app.post('/api/login', async (req, res) => {
-    const data = req.body;
-    console.log(data);
+    try {
+        const { user_name, password } = req.body;
 
-    let user_name = data['user_name'];
-    let password = data['password'];
+        if (!user_name || !password) return res.status(400).send("Missing username or password");
 
-    // Querying the MongoDB 'customers' collection for matching user_name and password
-    const documents = await Customers.find({ user_name: user_name });
+        const user = await Customers.findOne({ user_name });
 
-    // If a matching user is found, set the session username and serve the home page
-    if (documents.length > 0) {
-        let result = await bcrypt.compare(password, documents[0]['password'])
-        if(true) {
-            const genidValue = req.sessionID;
-            res.cookie('username', user_name);
-            res.sendFile(path.join(__dirname, 'frontend', 'home.html'));
-        } else {
-            res.send("Password Incorrect! Try again");
-        }
-    } else {
-        res.send("User Information incorrect");
+        if (!user) return res.status(401).send("User Information incorrect");
+
+        const match = await bcrypt.compare(password, user.password);
+        if (!match) return res.status(401).send("Password Incorrect! Try again");
+
+        req.session.username = user_name;
+        res.cookie('username', user_name);
+        res.sendFile(path.join(__dirname, 'frontend', 'home.html'));
+
+    } catch (error) {
+        console.error("❌ Error during login:", error);
+        res.status(500).send("Server error");
     }
 });
 
-// POST endpoint for adding a new customer
+// 🔹 Register New Customer Route
 app.post('/api/add_customer', async (req, res) => {
-    const data = req.body;
+    try {
+        const { user_name, age, password, email } = req.body;
 
-    const documents = await Customers.find({ user_name: data['user_name']});
-    if (documents.length > 0) {
-        res.send("User already exists");
+        if (!user_name || !age || !password || !email) return res.status(400).send("All fields are required");
+
+        const existingUser = await Customers.findOne({ user_name });
+        if (existingUser) return res.send("User already exists");
+
+        const hashedPassword = await bcrypt.hash(password, saltRounds);
+
+        const newCustomer = new Customers({
+            user_name,
+            age,
+            password: hashedPassword,
+            email
+        });
+
+        await newCustomer.save();
+        res.send("Customer added successfully");
+
+    } catch (error) {
+        console.error("❌ Error adding customer:", error);
+        res.status(500).send("Server error");
     }
-
-    let hashedpwd = bcrypt.hashSync(data['password'], saltRounds)
-
-    // Creating a new instance of the Customers model with data from the request
-    const customer = new Customers({
-        "user_name": data['user_name'],
-        "age": data['age'],
-        "password": hashedpwd,
-        "email": data['email']
-    });
-
-    // Saving the new customer to the MongoDB 'customers' collection
-    await customer.save();
-
-    res.send("Customer added successfully")
 });
 
-// GET endpoint for the root URL, serving the home page
-app.get('/', async (req, res) => {
+// 🔹 Serve Home Page
+app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, 'frontend', 'home.html'));
 });
 
-// GET endpoint for user logout
-app.get('/api/logout', async (req, res) => {
-    req.session.destroy((err) => {
-        if (err) {
-          console.error(err);
-        } else {
-          res.cookie('username', '', { expires: new Date(0) });
-          res.redirect('/');
-        }
-      });
+// 🔹 Logout Route
+app.get('/api/logout', (req, res) => {
+    req.session.destroy(err => {
+        if (err) console.error(err);
+        res.cookie('username', '', { expires: new Date(0) });
+        res.redirect('/');
+    });
 });
 
-// Starting the server and listening on the specified port
+// 🔹 Start Server
 app.listen(port, () => {
-    console.log(`Server is running on http://localhost:${port}`);
+    console.log(`🚀 Server is running at http://localhost:${port}`);
 });
