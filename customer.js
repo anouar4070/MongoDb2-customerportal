@@ -30,7 +30,7 @@ const customersSchema = new Schema({
 
 // Creating a model from the schema. This model will represent the 'customers' collection in MongoDB.
 // The first argument is the name of the collection, and the second argument is the schema.
-const CustomersModel = mongoose.model('customers', customersSchema);
+const CustomersModel = mongoose.model('Customer', customersSchema);
 
 // Exporting the CustomersModel to be used in other parts of the application.
 module.exports = CustomersModel;
